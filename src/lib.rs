@@ -110,6 +110,7 @@
 //! #
 //!
 //! #[EnumRepr(type = "c_int")]
+//! #[derive(Debug, PartialEq)]
 //! pub enum Test {
 //!     A,
 //!     B,
