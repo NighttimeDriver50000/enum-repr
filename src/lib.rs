@@ -99,6 +99,49 @@
 //! # fn main() {}
 //! ```
 //!
+//! Discriminants can be implicit:
+//! ```
+//! # extern crate enum_repr;
+//! # extern crate libc;
+//! #
+//! # use libc::*;
+//! #
+//! # use enum_repr::EnumRepr;
+//! #
+//!
+//! #[EnumRepr(type = "c_int")]
+//! pub enum Test {
+//!     A,
+//!     B,
+//!     C = 5,
+//!     D,
+//! }
+//!
+//! fn main() {
+//!     assert_eq!(Test::B.repr(), 1);
+//!     assert_eq!(IpProto::from_repr(6), Some(Test::D));
+//!     assert!(IpProto::from_repr(2).is_none());
+//! }
+//! ```
+//!
+//! Take extra care to avoid collisions when using implicit discriminants:
+//! ```compile_fail
+//! # #![deny(overflowing_literals)]
+//! # extern crate enum_repr;
+//! #
+//! # use enum_repr::EnumRepr;
+//! #
+//! #[EnumRepr(type = "u8")]
+//! enum Test {
+//!     A = 1,
+//!     B,
+//!     C,
+//!     D = 3,
+//! }
+//! #
+//! # fn main() {}
+//! ```
+//!
 //! Out of bound discriminants fail to compile:
 //! ```compile_fail
 //! # #![deny(overflowing_literals)]
@@ -109,6 +152,22 @@
 //! #[EnumRepr(type = "u8")]
 //! enum Test {
 //!     A = 256
+//! }
+//! #
+//! # fn main() {}
+//! ```
+//!
+//! Even if they are implicit:
+//! ```compile_fail
+//! # #![deny(overflowing_literals)]
+//! # extern crate enum_repr;
+//! #
+//! # use enum_repr::EnumRepr;
+//! #
+//! #[EnumRepr(type = "u8")]
+//! enum Test {
+//!     A = 255,
+//!     B
 //! }
 //! #
 //! # fn main() {}
@@ -181,10 +240,11 @@ pub fn EnumRepr(
     };
 
     let new_enum = convert_enum(&input, compiler_repr_ty);
-    let mut ret: TokenStream = new_enum.clone().into_token_stream().into();
+    let mut ret: TokenStream = new_enum.into_token_stream().into();
 
-    let gen = generate_code(&new_enum, repr_ty);
+    let gen = generate_code(&input, repr_ty);
     ret.extend(gen);
+    eprintln!("{}", ret);
     ret
 }
 
@@ -234,12 +294,16 @@ fn generate_code(input: &ItemEnum, repr_ty: Ident) -> TokenStream {
 }
 
 fn extract_variants(input: &ItemEnum) -> (Vec<Ident>, Vec<Expr>) {
+    let mut prev_expr: Expr = parse_quote!( 0 );
     let (names, discrs): (Vec<_>, Vec<_>) = input.variants.iter()
-        .map(|x| (
-            x.ident.clone(),
-            x.discriminant.as_ref()
-                .expect("no discriminant for a variant").1.clone()
-        )).unzip();
+        .map(|x| {
+            let expr = match x.discriminant.as_ref() {
+                Some(discr) => discr.1.clone(),
+                None => parse_quote!( 1 + #prev_expr ),
+            };
+            prev_expr = expr.clone();
+            ( x.ident.clone(), expr )
+        }).unzip();
     (names, discrs)
 }
 
