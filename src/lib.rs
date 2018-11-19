@@ -119,8 +119,8 @@
 //!
 //! fn main() {
 //!     assert_eq!(Test::B.repr(), 1);
-//!     assert_eq!(IpProto::from_repr(6), Some(Test::D));
-//!     assert!(IpProto::from_repr(2).is_none());
+//!     assert_eq!(Test::from_repr(6), Some(Test::D));
+//!     assert!(Test::from_repr(2).is_none());
 //! }
 //! ```
 //!
@@ -244,7 +244,6 @@ pub fn EnumRepr(
 
     let gen = generate_code(&input, repr_ty);
     ret.extend(gen);
-    eprintln!("{}", ret);
     ret
 }
 
