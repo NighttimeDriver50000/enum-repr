@@ -294,14 +294,17 @@ fn generate_code(input: &ItemEnum, repr_ty: Ident) -> TokenStream {
 }
 
 fn extract_variants(input: &ItemEnum) -> (Vec<Ident>, Vec<Expr>) {
-    let mut prev_expr: Expr = parse_quote!( 0 );
+    let mut prev_expr: Option<Expr> = None;
     let (names, discrs): (Vec<_>, Vec<_>) = input.variants.iter()
         .map(|x| {
             let expr = match x.discriminant.as_ref() {
                 Some(discr) => discr.1.clone(),
-                None => parse_quote!( 1 + #prev_expr ),
+                None => match prev_expr {
+                    Some(ref old_expr) => parse_quote!( 1 + #old_expr ),
+                    None => parse_quote!( 0 ),
+                }
             };
-            prev_expr = expr.clone();
+            prev_expr = Some(expr.clone());
             ( x.ident.clone(), expr )
         }).unzip();
     (names, discrs)
@@ -341,22 +344,24 @@ fn validate(vars: &punctuated::Punctuated<Variant, token::Comma>) {
 fn convert_enum(input: &ItemEnum, compiler_repr_ty: Ident) -> ItemEnum {
     let mut variants = input.variants.clone();
 
-    let mut prev_expr: Expr = parse_quote!( 0 as #compiler_repr_ty );
+    let mut prev_expr: Option<Expr> = None;
     variants.iter_mut().for_each(|ref mut var| {
         let discr_opt = var.discriminant.clone();
         let (eq, new_expr): (syn::token::Eq, Expr) = match discr_opt {
             Some(discr) => {
-                let expr = discr.1.into_token_stream();
-                ( discr.0,
-                    parse_quote!( (#expr) as #compiler_repr_ty ) )
+                let old_expr = discr.1.into_token_stream();
+                (discr.0, parse_quote!( (#old_expr) as #compiler_repr_ty ))
             },
             None => {
-                let expr = prev_expr.clone();
-                ( syn::token::Eq { spans: [Span::call_site(),] },
-                    parse_quote!( (1 + (#expr)) as #compiler_repr_ty ) )
+                let expr = match prev_expr.clone() {
+                    Some(old_expr) =>
+                        parse_quote!( (1 + (#old_expr)) as #compiler_repr_ty ),
+                    None => parse_quote!( 0 as #compiler_repr_ty ),
+                };
+                (syn::token::Eq { spans: [Span::call_site(),] }, expr)
             },
         };
-        prev_expr = new_expr.clone();
+        prev_expr = Some(new_expr.clone());
         var.discriminant = Some((eq, new_expr));
     });
 
