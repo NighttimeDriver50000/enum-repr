@@ -10,6 +10,7 @@ extern crate proc_macro;
 extern crate proc_macro2;
 #[macro_use] extern crate quote;
 extern crate syn;
+extern crate time;
 
 use std::iter;
 
@@ -37,8 +38,10 @@ pub fn EnumRepr(
     args: TokenStream,
     input: TokenStream
 ) -> TokenStream {
+    let t0 = time::precise_time_ns();
     let input = syn::parse::<ItemEnum>(input)
         .expect("#[EnumRepr] must only be used on enums");
+    eprintln!("parse input:  {}", time::precise_time_ns() - t0);
     validate(&input.variants);
 
     let (repr_ty, implicit, derive) = get_repr_type(args);
@@ -48,19 +51,29 @@ pub fn EnumRepr(
         _ => Ident::new(&"isize", Span::call_site())
     };
 
+    let t1 = time::precise_time_ns();
     let new_enum = convert_enum(&input, &compiler_repr_ty, implicit);
+    eprintln!("convert enum: {}", time::precise_time_ns() - t1);
     let mut ret: TokenStream = match derive {
         true => quote! {
             #[derive(Copy, Clone, PartialEq, Eq, Debug)]
         },
         false => quote! { },
     }.into();
-    
+
+    let t2 = time::precise_time_ns(); 
     let new: TokenStream = new_enum.into_token_stream().into();
+    eprintln!("into stream:  {}", time::precise_time_ns() - t2);
     ret.extend(new);
 
+    let t3 = time::precise_time_ns();
     let gen = generate_code(&input, &repr_ty);
+    eprintln!("genert. code: {}", time::precise_time_ns() - t3);
     ret.extend(gen);
+
+    let tf = time::precise_time_ns();
+    eprintln!("TOTAL:        {}", tf - t0);
+
     ret
 }
 
@@ -192,35 +205,70 @@ fn convert_enum(
     implicit: bool
 ) -> ItemEnum {
     let mut variants = input.variants.clone();
+    let mut prev_explicit: Option<Expr> = None;
+    let mut implicit_counter = 0;
 
-    let mut prev_expr: Option<Expr> = None;
+    let mut is_explicit = false;
+    let mut count_explicit = 0;
+    let mut count_implicit = 0;
+    let mut time_explicit = 0;
+    let mut time_implicit = 0;
+
     variants.iter_mut().for_each(|ref mut var| {
+        let t0 = time::precise_time_ns();
+
         let discr_opt = var.discriminant.clone();
         let (eq, new_expr): (syn::token::Eq, Expr) = match discr_opt {
             Some(discr) => {
+                is_explicit = true;
+
                 let old_expr = discr.1.into_token_stream();
-                (discr.0, parse_quote!( (#old_expr) as #compiler_repr_ty ))
+                prev_explicit = Some(parse_quote!( (#old_expr) as #compiler_repr_ty ));
+                implicit_counter = 0;
+                (discr.0, prev_explicit.clone().unwrap())
             },
             None => {
+                is_explicit = false;
+
                 if !implicit {
                     panic!("use implicit = true to enable implicit discriminants")
                 }
-                let expr = match prev_expr.clone() {
-                    Some(old_expr) =>
-                        parse_quote!( (1 + (#old_expr)) as #compiler_repr_ty ),
-                    None => parse_quote!( 0 as #compiler_repr_ty ),
+                let expr = match prev_explicit.clone() {
+                    Some(old_expr) => {
+                        implicit_counter += 1;
+                        let lit = syn::Lit::Int(syn::LitInt::new(implicit_counter,
+                            syn::IntSuffix::None, Span::call_site()));
+                        parse_quote!( (#lit + (#old_expr)) as #compiler_repr_ty )
+                    },
+                    None => {
+                        prev_explicit = Some(parse_quote!( 0 as #compiler_repr_ty ));
+                        prev_explicit.clone().unwrap()
+                    }
                 };
                 (syn::token::Eq { spans: [Span::call_site(),] }, expr)
             },
         };
-        prev_expr = Some(new_expr.clone());
         var.discriminant = Some((eq, new_expr));
+
+        let dt = time::precise_time_ns() - t0;
+        if is_explicit {
+            count_explicit += 1;
+            time_explicit += dt;
+        } else {
+            count_implicit += 1;
+            time_implicit += dt;
+        }
     });
+
+    eprintln!("exp ({}): {}", count_explicit, time_explicit);
+    eprintln!("    {}", time_explicit / count_explicit);
+    eprintln!("imp ({}): {}", count_implicit, time_implicit);
+    eprintln!("    {}", time_implicit / count_implicit);
 
     let mut attrs = input.attrs.clone();
     attrs.push(parse_quote!( #[repr(#compiler_repr_ty)] ));
-
     let ret = input.clone();
+
     ItemEnum {
         variants,
         attrs,

@@ -16,6 +16,7 @@ proc-macro = true
 proc-macro2 = "^0.4.8"
 quote = "^0.6.3"
 syn = { version = "^0.15.17", features = ["full"] }
+time = "0.1"
 
 [dev-dependencies]
 libc = "^0.2.42"
