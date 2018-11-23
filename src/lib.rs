@@ -78,7 +78,7 @@ fn generate_code(input: &ItemEnum, repr_ty: &Ident) -> TokenStream {
 
     let ret: TokenStream = quote! {
         impl #impl_generics Enum<#repr_ty4> for #ty #ty_generics #where_clause {
-            fn repr(&self) -> #repr_ty2 {
+            fn repr(self) -> #repr_ty2 {
                 match self {
                     #( #ty_repeat2::#names2 => #discrs2 as #repr_ty_repeat ),*
                 }
