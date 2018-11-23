@@ -41,7 +41,7 @@ pub fn EnumRepr(
         .expect("#[EnumRepr] must only be used on enums");
     validate(&input.variants);
 
-    let (repr_ty, implicit) = get_repr_type(args);
+    let (repr_ty, implicit, derive) = get_repr_type(args);
     let compiler_repr_ty = match repr_ty.to_string().as_str() {
         "i8" | "i16" | "i32" | "i64" | "i128"
         | "u8" | "u16" | "u32" | "u64" | "u128" | "usize" => repr_ty.clone(),
@@ -49,7 +49,15 @@ pub fn EnumRepr(
     };
 
     let new_enum = convert_enum(&input, &compiler_repr_ty, implicit);
-    let mut ret: TokenStream = new_enum.into_token_stream().into();
+    let mut ret: TokenStream = match derive {
+        true => quote! {
+            #[derive(Copy, Clone, PartialEq, Eq, Debug)]
+        },
+        false => quote! { },
+    }.into();
+    
+    let new: TokenStream = new_enum.into_token_stream().into();
+    ret.extend(new);
 
     let gen = generate_code(&input, &repr_ty);
     ret.extend(gen);
@@ -121,9 +129,10 @@ fn extract_variants(input: &ItemEnum) -> (Vec<Ident>, Vec<Expr>) {
     (names, discrs)
 }
 
-fn get_repr_type(args: TokenStream) -> (Ident, bool) {
+fn get_repr_type(args: TokenStream) -> (Ident, bool, bool) {
     let mut repr_type = None;
-    let mut implicit = false;
+    let mut implicit = true;
+    let mut derive = true;
     let args = syn::parse::<ArgsWrapper>(args)
         .expect("specify repr type in format \"#[EnumRepr]\"").args;
     args.iter().for_each(|arg| {
@@ -145,10 +154,15 @@ fn get_repr_type(args: TokenStream) -> (Ident, bool) {
                             Lit::Bool(imp) => imp.value,
                             _ => panic!("\"implicit\" parameter must be bool")
                         }
+                    } else if param == "derive" {
+                        derive = match lit {
+                            Lit::Bool(der) => der.value,
+                            _ => panic!("\"derive\" parameter must be bool")
+                        }
                     } else {
                         eprintln!("{}", param);
                         panic!("#[EnumRepr] accepts arguments named \
-                            \"type\" and \"implicit\"")
+                            \"type\", \"implicit\", and \"derive\"")
                     }
                 },
                 _ => panic!("specify repr type in format \
@@ -156,7 +170,7 @@ fn get_repr_type(args: TokenStream) -> (Ident, bool) {
             }
         });
     match repr_type {
-        Some(repr_ty) => (repr_ty, implicit),
+        Some(repr_ty) => (repr_ty, implicit, derive),
         None => panic!("\"type \" parameter is required")
     }
 }
