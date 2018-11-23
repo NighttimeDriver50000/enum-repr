@@ -38,77 +38,130 @@ pub fn EnumRepr(
     args: TokenStream,
     input: TokenStream
 ) -> TokenStream {
-    let t0 = time::precise_time_ns();
+    //let t0 = time::precise_time_ns();
     let input = syn::parse::<ItemEnum>(input)
         .expect("#[EnumRepr] must only be used on enums");
-    eprintln!("parse input:  {}", time::precise_time_ns() - t0);
+    //eprintln!("parse input:  {}", time::precise_time_ns() - t0);
     validate(&input.variants);
 
-    let (repr_ty, implicit, derive) = get_repr_type(args);
-    let compiler_repr_ty = match repr_ty.to_string().as_str() {
-        "i8" | "i16" | "i32" | "i64" | "i128"
-        | "u8" | "u16" | "u32" | "u64" | "u128" | "usize" => repr_ty.clone(),
-        _ => Ident::new(&"isize", Span::call_site())
+    let (repr_ty, implicit, derive, enable_fast) = get_repr_type(args);
+    let (compiler_repr_ty, fast_gen) = match repr_ty.to_string().as_str() {
+        "i8" | "i16" | "i32" | "i64" | "isize"
+        | "u8" | "u16" | "u32" | "u64" | "usize" => {
+            (repr_ty.clone(), enable_fast)
+        },
+        "i128" | "u128" => {
+            if implicit {
+                panic!("Implicit not supported for 128-bit reprs!");
+            }
+            (repr_ty.clone(), false)
+        },
+        _ => {
+            (Ident::new(&"isize", Span::call_site()), false)
+        },
     };
 
-    let t1 = time::precise_time_ns();
-    let new_enum = convert_enum(&input, &compiler_repr_ty, implicit);
-    eprintln!("convert enum: {}", time::precise_time_ns() - t1);
-    let mut ret: TokenStream = match derive {
-        true => quote! {
-            #[derive(Copy, Clone, PartialEq, Eq, Debug)]
-        },
-        false => quote! { },
-    }.into();
+    //let t1 = time::precise_time_ns();
+    let new_enum = convert_enum(&input, &compiler_repr_ty,
+        implicit, derive, fast_gen);
+    //eprintln!("convert enum: {}", time::precise_time_ns() - t1);
 
-    let t2 = time::precise_time_ns(); 
-    let new: TokenStream = new_enum.into_token_stream().into();
-    eprintln!("into stream:  {}", time::precise_time_ns() - t2);
-    ret.extend(new);
+    //let t2 = time::precise_time_ns(); 
+    let mut ret: TokenStream = new_enum.into_token_stream().into();
+    //eprintln!("into stream:  {}", time::precise_time_ns() - t2);
 
-    let t3 = time::precise_time_ns();
-    let gen = generate_code(&input, &repr_ty);
-    eprintln!("genert. code: {}", time::precise_time_ns() - t3);
+    //let t3 = time::precise_time_ns();
+    let gen = match fast_gen {
+        true => generate_code_fast(&input, &repr_ty),
+        false => generate_code(&input, &repr_ty),
+    };
+    //eprintln!("genert. code: {}", time::precise_time_ns() - t3);
     ret.extend(gen);
 
-    let tf = time::precise_time_ns();
-    eprintln!("TOTAL:        {}", tf - t0);
+    //let tf = time::precise_time_ns();
+    //eprintln!("TOTAL:        {}", tf - t0);
 
     ret
 }
 
-fn generate_code(input: &ItemEnum, repr_ty: &Ident) -> TokenStream {
+fn generate_code_fast(input: &ItemEnum, repr_ty1: &Ident) -> TokenStream {
+    //let t0 = time::precise_time_ns();
+
     let ty = input.ident.clone();
-    let (names, discrs) = extract_variants(input);
     let vars_len = input.variants.len();
-
-    let (names2, discrs2, discrs3) =
-        (names.clone(), discrs.clone(), discrs.clone());
-    let repr_ty2 = repr_ty.clone();
-    let repr_ty3 = repr_ty.clone();
-    let repr_ty4 = repr_ty.clone();
-    let ty_repeat = iter::repeat(ty.clone()).take(vars_len);
-    let ty_repeat2 = ty_repeat.clone();
-    let repr_ty_repeat = iter::repeat(repr_ty.clone()).take(vars_len);
-    let repr_ty_repeat2 = repr_ty_repeat.clone();
-    let repr_ty_repeat3 = repr_ty_repeat.clone();
-
+    let (names1, discrs1) = extract_variants(input, true);
+    let (names2, discrs2) = (names1.clone(), discrs1.clone());
+    let (repr_ty2, repr_ty3) = (repr_ty1.clone(), repr_ty1.clone());
+    let ty_repeat1 = iter::repeat(ty.clone()).take(vars_len);
+    let ty_repeat2 = ty_repeat1.clone();
     let generics_tuple = input.generics.split_for_impl();
-    let (impl_generics, ty_generics, where_clause) = generics_tuple.clone();
-    let (impl_generics2, ty_generics2, where_clause2) = generics_tuple;
+    let (impl_generics, ty_generics, where_clause) = generics_tuple;
+
+    //let t1 = time::precise_time_ns();
 
     let ret: TokenStream = quote! {
-        impl #impl_generics Enum<#repr_ty4> for #ty #ty_generics #where_clause {
+        impl #impl_generics Enum<#repr_ty1> for #ty #ty_generics #where_clause {
             fn repr(self) -> #repr_ty2 {
                 match self {
-                    #( #ty_repeat2::#names2 => #discrs2 as #repr_ty_repeat ),*
+                    #( #ty_repeat1::#names1 => #discrs1, )*
                 }
             }
 
             fn from_repr(x: #repr_ty3) -> Option<#ty> {
                 match x {
-                    #( x if x == #discrs as #repr_ty_repeat2 => Some(#ty_repeat::#names), )*
-                    _ => None
+                    #( #discrs2 => Some(#ty_repeat2::#names2), )*
+                    _ => None,
+                }
+            }
+        }
+    }.into();
+
+    //let t2 = time::precise_time_ns();
+    //eprintln!("attack of the clone()s: FAST {}", t1 - t0);
+    //eprintln!("nevermore! quoth the raven:  {}", t2 - t1);
+
+    ret
+}
+
+fn generate_code(input: &ItemEnum, repr_ty: &Ident) -> TokenStream {
+    //let t0 = time::precise_time_ns();
+
+    let ty = input.ident.clone();
+    let vars_len = input.variants.len();
+
+    let (names1, discrs1) = extract_variants(input, false);
+    let names2 = names1.clone();
+    let discrs2 = discrs1.clone();
+    let discrs3 = discrs1.clone();
+
+    let repr_ty1 = repr_ty.clone();
+    let repr_ty2 = repr_ty.clone();
+    let repr_ty3 = repr_ty.clone();
+    let ty_repeat1 = iter::repeat(ty.clone()).take(vars_len);
+    let ty_repeat2 = ty_repeat1.clone();
+    let repr_ty_repeat1 = iter::repeat(repr_ty).take(vars_len);
+    let repr_ty_repeat2 = repr_ty_repeat1.clone();
+    let repr_ty_repeat3 = repr_ty_repeat1.clone();
+
+    let generics_tuple = input.generics.split_for_impl();
+    let (impl_generics1, ty_generics1, where_clause1) = generics_tuple.clone();
+    let (impl_generics2, ty_generics2, where_clause2) = generics_tuple;
+
+    //let t1 = time::precise_time_ns();
+
+    let ret: TokenStream = quote! {
+        impl #impl_generics1 Enum<#repr_ty1> for #ty #ty_generics1 #where_clause1 {
+            fn repr(self) -> #repr_ty2 {
+                match self {
+                    #( #ty_repeat1::#names1 => #discrs1 as #repr_ty_repeat1, )*
+                }
+            }
+
+            fn from_repr(x: #repr_ty3) -> Option<#ty> {
+                match x {
+                    #( x if x == #discrs2 as #repr_ty_repeat2
+                        => Some(#ty_repeat2::#names2), )*
+                    _ => None,
                 }
             }
         }
@@ -122,30 +175,91 @@ fn generate_code(input: &ItemEnum, repr_ty: &Ident) -> TokenStream {
             }
         }
     }.into();
+
+    //let t2 = time::precise_time_ns();
+    //eprintln!("attack of the clone()s:      {}", t1 - t0);
+    //eprintln!("nevermore! quoth the raven:  {}", t2 - t1);
+
     ret
 }
 
-fn extract_variants(input: &ItemEnum) -> (Vec<Ident>, Vec<Expr>) {
-    let mut prev_expr: Option<Expr> = None;
+fn extract_variants(input: &ItemEnum, fast_gen: bool) -> (Vec<Ident>, Vec<Expr>) {
+    let mut prev_explicit: Option<Expr> = None;
+    let mut implicit_counter = 0;
     let (names, discrs): (Vec<_>, Vec<_>) = input.variants.iter()
         .map(|x| {
             let expr = match x.discriminant.as_ref() {
-                Some(discr) => discr.1.clone(),
-                None => match prev_expr {
-                    Some(ref old_expr) => parse_quote!( 1 + #old_expr ),
-                    None => parse_quote!( 0 ),
-                }
+                Some(discr) => {
+                    prev_explicit = Some(discr.1.clone());
+                    implicit_counter = 0;
+                    prev_explicit.clone().unwrap()
+                },
+                None => match prev_explicit.clone() {
+                    Some(syn::Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Int(ref x),
+                        attrs: _,
+                    })) if fast_gen == true => {
+                        implicit_counter += 1;
+                        let lit = syn::Lit::Int(syn::LitInt::new(
+                            implicit_counter + x.value(),
+                            syn::IntSuffix::None, Span::call_site()));
+                        parse_quote!( #lit )
+                    },
+                    /* // NEEDS NIGHTLY feature(box_patterns)
+                    Some(syn::Expr::Unary(syn::ExprUnary {
+                        attrs: _,
+                        op: syn::UnOp::Neg(_),
+                        expr: box syn::Expr::Lit(syn::ExprLit {
+                            lit: syn::Lit::Int(x),
+                            attrs: _,
+                        }),
+                    })) if fast_gen == true => {
+                    */ // WORKAROUND:
+                    Some(syn::Expr::Unary(syn::ExprUnary {
+                        attrs: _,
+                        op: syn::UnOp::Neg(_),
+                        ref expr,
+                    })) if fast_gen == true => {
+                        let x = match **expr {
+                            syn::Expr::Lit(syn::ExprLit {
+                                lit: syn::Lit::Int(ref y),
+                                attrs: _,
+                            }) => y,
+                            _ => panic!("I need box matching!"),
+                        };
+                    // END WORKAROUND
+                        implicit_counter += 1;
+                        let v = (implicit_counter as i64) - (x.value() as i64);
+                        let lit = syn::Lit::Int(syn::LitInt::new(v.abs() as u64,
+                            syn::IntSuffix::None, Span::call_site()));
+                        if v < 0 {
+                            parse_quote!( -#lit )
+                        } else {
+                            parse_quote!( #lit )
+                        }
+                    },
+                    Some(old_expr) => {
+                        implicit_counter += 1;
+                        let lit = syn::Lit::Int(syn::LitInt::new(implicit_counter,
+                            syn::IntSuffix::None, Span::call_site()));
+                        parse_quote!( #lit + (#old_expr) )
+                    },
+                    None => {
+                        prev_explicit = Some(parse_quote!( 0 ));
+                        prev_explicit.clone().unwrap()
+                    },
+                },
             };
-            prev_expr = Some(expr.clone());
             ( x.ident.clone(), expr )
         }).unzip();
     (names, discrs)
 }
 
-fn get_repr_type(args: TokenStream) -> (Ident, bool, bool) {
+fn get_repr_type(args: TokenStream) -> (Ident, bool, bool, bool) {
     let mut repr_type = None;
     let mut implicit = true;
     let mut derive = true;
+    let mut enable_fast = true;
     let args = syn::parse::<ArgsWrapper>(args)
         .expect("specify repr type in format \"#[EnumRepr]\"").args;
     args.iter().for_each(|arg| {
@@ -172,6 +286,11 @@ fn get_repr_type(args: TokenStream) -> (Ident, bool, bool) {
                             Lit::Bool(der) => der.value,
                             _ => panic!("\"derive\" parameter must be bool")
                         }
+                    } else if param == "fast" {
+                        enable_fast = match lit {
+                            Lit::Bool(fast) => fast.value,
+                            _ => panic!("\"fast\" parameter must be bool")
+                        }
                     } else {
                         eprintln!("{}", param);
                         panic!("#[EnumRepr] accepts arguments named \
@@ -183,7 +302,7 @@ fn get_repr_type(args: TokenStream) -> (Ident, bool, bool) {
             }
         });
     match repr_type {
-        Some(repr_ty) => (repr_ty, implicit, derive),
+        Some(repr_ty) => (repr_ty, implicit, derive, enable_fast),
         None => panic!("\"type \" parameter is required")
     }
 }
@@ -202,34 +321,29 @@ fn validate(vars: &punctuated::Punctuated<Variant, token::Comma>) {
 fn convert_enum(
     input: &ItemEnum,
     compiler_repr_ty: &Ident,
-    implicit: bool
+    implicit: bool,
+    derive: bool,
+    fast_gen: bool,
 ) -> ItemEnum {
     let mut variants = input.variants.clone();
     let mut prev_explicit: Option<Expr> = None;
     let mut implicit_counter = 0;
 
-    let mut is_explicit = false;
-    let mut count_explicit = 0;
-    let mut count_implicit = 0;
-    let mut time_explicit = 0;
-    let mut time_implicit = 0;
-
     variants.iter_mut().for_each(|ref mut var| {
-        let t0 = time::precise_time_ns();
-
         let discr_opt = var.discriminant.clone();
         let (eq, new_expr): (syn::token::Eq, Expr) = match discr_opt {
             Some(discr) => {
-                is_explicit = true;
-
-                let old_expr = discr.1.into_token_stream();
-                prev_explicit = Some(parse_quote!( (#old_expr) as #compiler_repr_ty ));
+                prev_explicit = Some(match fast_gen {
+                    true => discr.1.clone(),
+                    false => {
+                        let old_expr = discr.1.into_token_stream();
+                        parse_quote!( (#old_expr) as #compiler_repr_ty )
+                    },
+                });
                 implicit_counter = 0;
                 (discr.0, prev_explicit.clone().unwrap())
             },
             None => {
-                is_explicit = false;
-
                 if !implicit {
                     panic!("use implicit = true to enable implicit discriminants")
                 }
@@ -238,10 +352,18 @@ fn convert_enum(
                         implicit_counter += 1;
                         let lit = syn::Lit::Int(syn::LitInt::new(implicit_counter,
                             syn::IntSuffix::None, Span::call_site()));
-                        parse_quote!( (#lit + (#old_expr)) as #compiler_repr_ty )
+                        match fast_gen {
+                            true => parse_quote!( #lit + (#old_expr) ),
+                            false => {
+                                parse_quote!( (#lit + (#old_expr)) as #compiler_repr_ty )
+                            },
+                        }
                     },
                     None => {
-                        prev_explicit = Some(parse_quote!( 0 as #compiler_repr_ty ));
+                        prev_explicit = Some(match fast_gen {
+                            true => parse_quote!( 0 ),
+                            false => parse_quote!( 0 as #compiler_repr_ty ),
+                        });
                         prev_explicit.clone().unwrap()
                     }
                 };
@@ -249,24 +371,13 @@ fn convert_enum(
             },
         };
         var.discriminant = Some((eq, new_expr));
-
-        let dt = time::precise_time_ns() - t0;
-        if is_explicit {
-            count_explicit += 1;
-            time_explicit += dt;
-        } else {
-            count_implicit += 1;
-            time_implicit += dt;
-        }
     });
-
-    eprintln!("exp ({}): {}", count_explicit, time_explicit);
-    eprintln!("    {}", time_explicit / count_explicit);
-    eprintln!("imp ({}): {}", count_implicit, time_implicit);
-    eprintln!("    {}", time_implicit / count_implicit);
 
     let mut attrs = input.attrs.clone();
     attrs.push(parse_quote!( #[repr(#compiler_repr_ty)] ));
+    if derive {
+        attrs.push(parse_quote!( #[derive(Copy, Clone, PartialEq, Eq, Debug)] ));
+    }
     let ret = input.clone();
 
     ItemEnum {
