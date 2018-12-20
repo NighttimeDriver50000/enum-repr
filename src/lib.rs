@@ -91,9 +91,11 @@ fn generate_code_fast(input: &ItemEnum, repr_ty1: &Ident) -> TokenStream {
     let vars_len = input.variants.len();
     let (names1, discrs1) = extract_variants(input, true);
     let (names2, discrs2) = (names1.clone(), discrs1.clone());
+    let names3 = names1.clone();
     let (repr_ty2, repr_ty3) = (repr_ty1.clone(), repr_ty1.clone());
     let ty_repeat1 = iter::repeat(ty.clone()).take(vars_len);
     let ty_repeat2 = ty_repeat1.clone();
+    let ty_repeat3 = ty_repeat1.clone();
     let generics_tuple = input.generics.split_for_impl();
     let (impl_generics, ty_generics, where_clause) = generics_tuple;
 
@@ -101,15 +103,19 @@ fn generate_code_fast(input: &ItemEnum, repr_ty1: &Ident) -> TokenStream {
 
     let ret: TokenStream = quote! {
         impl #impl_generics Enum<#repr_ty1> for #ty #ty_generics #where_clause {
+            const COUNT: usize = #vars_len;
+
+            const VALUES: &'static [Self] = &[ #( #ty_repeat1::#names1, )* ];
+
             fn repr(self) -> #repr_ty2 {
                 match self {
-                    #( #ty_repeat1::#names1 => #discrs1, )*
+                    #( #ty_repeat2::#names2 => #discrs1, )*
                 }
             }
 
             fn from_repr(x: #repr_ty3) -> Option<#ty> {
                 match x {
-                    #( #discrs2 => Some(#ty_repeat2::#names2), )*
+                    #( #discrs2 => Some(#ty_repeat3::#names3), )*
                     _ => None,
                 }
             }
@@ -131,6 +137,7 @@ fn generate_code(input: &ItemEnum, repr_ty: &Ident) -> TokenStream {
 
     let (names1, discrs1) = extract_variants(input, false);
     let names2 = names1.clone();
+    let names3 = names1.clone();
     let discrs2 = discrs1.clone();
     let discrs3 = discrs1.clone();
 
@@ -139,6 +146,7 @@ fn generate_code(input: &ItemEnum, repr_ty: &Ident) -> TokenStream {
     let repr_ty3 = repr_ty.clone();
     let ty_repeat1 = iter::repeat(ty.clone()).take(vars_len);
     let ty_repeat2 = ty_repeat1.clone();
+    let ty_repeat3 = ty_repeat1.clone();
     let repr_ty_repeat1 = iter::repeat(repr_ty).take(vars_len);
     let repr_ty_repeat2 = repr_ty_repeat1.clone();
     let repr_ty_repeat3 = repr_ty_repeat1.clone();
@@ -151,16 +159,20 @@ fn generate_code(input: &ItemEnum, repr_ty: &Ident) -> TokenStream {
 
     let ret: TokenStream = quote! {
         impl #impl_generics1 Enum<#repr_ty1> for #ty #ty_generics1 #where_clause1 {
+            const COUNT: usize = #vars_len;
+
+            const VALUES: &'static [Self] = &[ #( #ty_repeat1::#names1, )* ];
+
             fn repr(self) -> #repr_ty2 {
                 match self {
-                    #( #ty_repeat1::#names1 => #discrs1 as #repr_ty_repeat1, )*
+                    #( #ty_repeat2::#names2 => #discrs1 as #repr_ty_repeat1, )*
                 }
             }
 
             fn from_repr(x: #repr_ty3) -> Option<#ty> {
                 match x {
                     #( x if x == #discrs2 as #repr_ty_repeat2
-                        => Some(#ty_repeat2::#names2), )*
+                        => Some(#ty_repeat3::#names3), )*
                     _ => None,
                 }
             }
