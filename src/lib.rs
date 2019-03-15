@@ -108,7 +108,9 @@ fn generate_code_fast(input: &ItemEnum, repr_ty1: &Ident) -> TokenStream {
     //let t1 = time::precise_time_ns();
 
     let ret: TokenStream = quote! {
-        impl #impl_generics Enum<#repr_ty1> for #ty #ty_generics #where_clause {
+        impl #impl_generics Enum for #ty #ty_generics #where_clause {
+            type Repr = #repr_ty1;
+
             const COUNT: usize = #vars_len;
 
             const VALUES: &'static [Self] = &[ #( #ty_repeat1::#names1, )* ];
@@ -164,7 +166,9 @@ fn generate_code(input: &ItemEnum, repr_ty: &Ident) -> TokenStream {
     //let t1 = time::precise_time_ns();
 
     let ret: TokenStream = quote! {
-        impl #impl_generics1 Enum<#repr_ty1> for #ty #ty_generics1 #where_clause1 {
+        impl #impl_generics1 Enum for #ty #ty_generics1 #where_clause1 {
+            type Repr = #repr_ty1;
+
             const COUNT: usize = #vars_len;
 
             const VALUES: &'static [Self] = &[ #( #ty_repeat1::#names1, )* ];
