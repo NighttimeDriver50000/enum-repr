@@ -388,7 +388,7 @@ fn convert_enum(
     let mut attrs = input.attrs.clone();
     attrs.push(parse_quote!( #[repr(#compiler_repr_ty)] ));
     if derive {
-        attrs.push(parse_quote!( #[derive(Copy, Clone, PartialEq, Eq, Debug)] ));
+        attrs.push(parse_quote!( #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)] ));
     }
     let ret = input.clone();
 
