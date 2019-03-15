@@ -10,7 +10,7 @@
 
 //! **Do not use this crate directly, and do not push it to upstream.**
 //!
-//! See [pbirch::enums](../pbirch/enums/index.html).
+//! See [vdex::enums](../vdex/enums/index.html).
 
 extern crate proc_macro;
 extern crate proc_macro2;
